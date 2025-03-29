@@ -30,11 +30,11 @@ def save_data(data):
     with open(DATA_FILE, 'w') as f:
         json.dump(data, f, indent=2)
 
-@dp.message(commands=["start"])
+@dp.message(lambda message: message.text.startswith("/start"))
 async def start_cmd(message: Message):
     await message.answer("Привет, Даниэль! Я твой бот по ETH на споте. Напиши /status, чтобы увидеть стратегию.")
 
-@dp.message(commands=["status"])
+@dp.message(lambda message: message.text.startswith("/status"))
 async def status_cmd(message: Message):
     data = load_data()
     text = (
@@ -44,7 +44,7 @@ async def status_cmd(message: Message):
     )
     await message.answer(text)
 
-@dp.message(commands=["add"])
+@dp.message(lambda message: message.text.startswith("/add"))
 async def add_cmd(message: Message):
     try:
         parts = message.text.split()
@@ -66,7 +66,7 @@ async def add_cmd(message: Message):
     except:
         await message.answer("Формат: /add [цена] [кол-во ETH]")
 
-@dp.message(commands=["fix"])
+@dp.message(lambda message: message.text.startswith("/fix"))
 async def fix_cmd(message: Message):
     try:
         parts = message.text.split()
@@ -86,12 +86,12 @@ async def fix_cmd(message: Message):
     except:
         await message.answer("Формат: /fix [цена] [процент от позиции]")
 
-@dp.message(commands=["avgprice"])
+@dp.message(lambda message: message.text.startswith("/avgprice"))
 async def avg_cmd(message: Message):
     data = load_data()
     await message.answer(f"Текущая средняя цена: {data['avg_price']:.2f} USDT")
 
-@dp.message(commands=["reset"])
+@dp.message(lambda message: message.text.startswith("/reset"))
 async def reset_cmd(message: Message):
     save_data({"avg_price": 0, "eth_total": 0, "usdt_total": 0, "history": []})
     await message.answer("Данные сброшены. Можно начинать новую сессию.")
