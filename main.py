@@ -6,8 +6,9 @@ from email.mime.base import MIMEBase
 from email.mime.text import MIMEText
 from email import encoders
 from datetime import datetime
-from aiogram import types, F, Dispatcher
+from aiogram import types, F, Dispatcher, Bot
 from aiogram.types import Message
+from aiohttp import web
 
 # SMTP-переменные через Render Environment
 SMTP_USER = os.getenv("SMTP_USER")
@@ -16,6 +17,24 @@ SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
 SMTP_PORT = int(os.getenv("SMTP_PORT", 587))
 
 SUPPORTED_TOKENS = ["ETH", "DOT", "AVAX", "RENDER"]
+
+# Базовые настройки бота
+API_TOKEN = os.getenv("BOT_TOKEN")
+WEBHOOK_HOST = os.getenv("WEBHOOK_HOST")
+WEBHOOK_PATH = "/webhook"
+WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
+
+bot = Bot(token=API_TOKEN)
+dp = Dispatcher()
+
+# Healthcheck endpoint
+async def healthcheck(request):
+    return web.Response(text="OK")
+
+app = web.Application()
+app.router.add_get("/healthz", healthcheck)
+
+# Загрузка и сохранение истории
 
 def load_data(token):
     try:
@@ -30,6 +49,7 @@ def save_data(token, data):
     with open(f"{token}.json", "w") as f:
         json.dump(data, f, indent=2)
 
+# Email-функция
 async def send_email_with_attachment(to_email, subject, body, file_path):
     msg = MIMEMultipart()
     msg['From'] = SMTP_USER
@@ -50,8 +70,7 @@ async def send_email_with_attachment(to_email, subject, body, file_path):
         server.login(SMTP_USER, SMTP_PASS)
         server.send_message(msg)
 
-dp = Dispatcher()
-
+# Команда отправки email
 @dp.message(F.text.startswith("/send_email"))
 async def send_email_cmd(message: Message):
     try:
@@ -86,3 +105,26 @@ async def send_email_cmd(message: Message):
         await message.answer(f"📧 Отчёт по {token} отправлен на {email}!")
     except Exception as e:
         await message.answer("Ошибка при отправке email. Проверь конфигурацию.")
+
+# Запуск aiohttp + бота
+if __name__ == '__main__':
+    import asyncio
+    from aiogram import Router
+    from aiogram.fsm.storage.memory import MemoryStorage
+    from aiogram.dispatcher.dispatcher import Dispatcher
+    from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
+
+    router = Router()
+    router.include_router(dp)
+    dp = Dispatcher(storage=MemoryStorage())
+    dp.include_router(router)
+
+    async def main():
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, port=8000)
+        await site.start()
+        await bot.delete_webhook(drop_pending_updates=True)
+        await dp.start_polling(bot)
+
+    asyncio.run(main())
