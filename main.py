@@ -12,7 +12,7 @@ from aiohttp import web
 
 # SMTP-переменные через Render Environment
 SMTP_USER = os.getenv("SMTP_USER")
-SMTP_PASS = os.getenv("SMTP_PASS")
+SMTP_PASS = "oxeygawgsbcrpfae"  # ВСТАВЛЕН 16-ЗНАЧНЫЙ APP PASSWORD
 SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
 SMTP_PORT = int(os.getenv("SMTP_PORT", 587))
 
