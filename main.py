@@ -101,6 +101,10 @@ async def reset_cmd(message: Message):
     save_data({"avg_price": 0, "eth_total": 0, "usdt_total": 0, "history": []})
     await message.answer("Данные сброшены. Можно начинать новую сессию.")
 
+@dp.message(lambda message: message.text.startswith("/whoami"))
+async def whoami_cmd(message: Message):
+    await message.answer(f"Твой Telegram ID: <code>{message.from_user.id}</code>")
+
 async def fetch_eth_price():
     url = "https://www.mexc.com/open/api/v2/market/ticker?symbol=ETH_USDT"
     async with aiohttp.ClientSession() as session:
@@ -117,14 +121,16 @@ async def price_watcher():
     while True:
         price = await fetch_eth_price()
         if price:
-            if price < BUY_ZONE and not notified_buy:
-                await bot.send_message(chat_id=os.getenv("OWNER_ID"), text=f"📉 ETH упал до ${price:.2f} — зона входа!")
-                notified_buy = True
-                notified_sell = False
-            elif price > SELL_ZONE and not notified_sell:
-                await bot.send_message(chat_id=os.getenv("OWNER_ID"), text=f"📈 ETH достиг ${price:.2f} — зона фиксации прибыли!")
-                notified_sell = True
-                notified_buy = False
+            owner_id = os.getenv("OWNER_ID")
+            if owner_id:
+                if price < BUY_ZONE and not notified_buy:
+                    await bot.send_message(chat_id=int(owner_id), text=f"📉 ETH упал до ${price:.2f} — зона входа!")
+                    notified_buy = True
+                    notified_sell = False
+                elif price > SELL_ZONE and not notified_sell:
+                    await bot.send_message(chat_id=int(owner_id), text=f"📈 ETH достиг ${price:.2f} — зона фиксации прибыли!")
+                    notified_sell = True
+                    notified_buy = False
         await asyncio.sleep(20)
 
 async def on_startup(app):
