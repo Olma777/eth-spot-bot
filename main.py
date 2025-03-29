@@ -109,15 +109,10 @@ async def send_email_cmd(message: Message):
 # Запуск aiohttp + бота
 if __name__ == '__main__':
     import asyncio
-    from aiogram import Router
     from aiogram.fsm.storage.memory import MemoryStorage
-    from aiogram.dispatcher.dispatcher import Dispatcher
     from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 
-    router = Router()
-    router.include_router(dp)
     dp = Dispatcher(storage=MemoryStorage())
-    dp.include_router(router)
 
     async def main():
         runner = web.AppRunner(app)
