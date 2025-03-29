@@ -7,6 +7,8 @@ from aiohttp import web
 import logging
 import os
 import json
+import aiohttp
+import asyncio
 
 API_TOKEN = os.getenv("BOT_TOKEN")
 WEBHOOK_HOST = os.getenv("WEBHOOK_HOST")
@@ -19,6 +21,9 @@ bot = Bot(token=API_TOKEN, session=session, parse_mode=ParseMode.HTML)
 dp = Dispatcher(storage=storage)
 
 DATA_FILE = "data.json"
+BUY_ZONE = 1880.0  # Зона покупки ETH
+SELL_ZONE = 1960.0  # Зона фиксации прибыли
+
 
 def load_data():
     if not os.path.exists(DATA_FILE):
@@ -96,8 +101,35 @@ async def reset_cmd(message: Message):
     save_data({"avg_price": 0, "eth_total": 0, "usdt_total": 0, "history": []})
     await message.answer("Данные сброшены. Можно начинать новую сессию.")
 
+async def fetch_eth_price():
+    url = "https://www.mexc.com/open/api/v2/market/ticker?symbol=ETH_USDT"
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.get(url) as resp:
+                data = await resp.json()
+                return float(data['data'][0]['last'])
+        except:
+            return None
+
+async def price_watcher():
+    notified_buy = False
+    notified_sell = False
+    while True:
+        price = await fetch_eth_price()
+        if price:
+            if price < BUY_ZONE and not notified_buy:
+                await bot.send_message(chat_id=os.getenv("OWNER_ID"), text=f"📉 ETH упал до ${price:.2f} — зона входа!")
+                notified_buy = True
+                notified_sell = False
+            elif price > SELL_ZONE and not notified_sell:
+                await bot.send_message(chat_id=os.getenv("OWNER_ID"), text=f"📈 ETH достиг ${price:.2f} — зона фиксации прибыли!")
+                notified_sell = True
+                notified_buy = False
+        await asyncio.sleep(20)
+
 async def on_startup(app):
     await bot.set_webhook(WEBHOOK_URL)
+    asyncio.create_task(price_watcher())
 
 async def on_shutdown(app):
     await bot.delete_webhook()
