@@ -1,18 +1,21 @@
 import os
 import smtplib
 import openpyxl
+import json
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email.mime.text import MIMEText
 from email import encoders
 from datetime import datetime
-from aiogram import types, F, Dispatcher, Bot
+from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message
+from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 from aiohttp import web
+from aiogram.fsm.storage.memory import MemoryStorage
 
 # SMTP-переменные через Render Environment
 SMTP_USER = os.getenv("SMTP_USER")
-SMTP_PASS = "oxeygawgsbcrpfae"  # ВСТАВЛЕН 16-ЗНАЧНЫЙ APP PASSWORD
+SMTP_PASS = "oxeygawgsbcrpfae"  # 16-значный App Password
 SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
 SMTP_PORT = int(os.getenv("SMTP_PORT", 587))
 
@@ -25,7 +28,8 @@ WEBHOOK_PATH = "/webhook"
 WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
 
 bot = Bot(token=API_TOKEN)
-dp = Dispatcher()
+storage = MemoryStorage()
+dp = Dispatcher(storage=storage)
 
 # Healthcheck endpoint
 async def healthcheck(request):
@@ -38,14 +42,12 @@ app.router.add_get("/healthz", healthcheck)
 
 def load_data(token):
     try:
-        import json
         with open(f"{token}.json", "r") as f:
             return json.load(f)
     except:
         return {"avg_price": 0, "eth_total": 0, "usdt_total": 0, "history": []}
 
 def save_data(token, data):
-    import json
     with open(f"{token}.json", "w") as f:
         json.dump(data, f, indent=2)
 
@@ -104,22 +106,16 @@ async def send_email_cmd(message: Message):
         )
         await message.answer(f"📧 Отчёт по {token} отправлен на {email}!")
     except Exception as e:
-        await message.answer("Ошибка при отправке email. Проверь конфигурацию.")
+        await message.answer(f"Ошибка при отправке email: {e}")
 
-# Запуск aiohttp + бота
+# Запуск aiohttp + Webhook
 if __name__ == '__main__':
     import asyncio
-    from aiogram.fsm.storage.memory import MemoryStorage
-    from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 
-    dp = Dispatcher(storage=MemoryStorage())
+    async def on_startup(dispatcher: Dispatcher, bot: Bot):
+        await bot.set_webhook(WEBHOOK_URL)
 
-    async def main():
-        runner = web.AppRunner(app)
-        await runner.setup()
-        site = web.TCPSite(runner, port=8000)
-        await site.start()
-        await bot.delete_webhook(drop_pending_updates=True)
-        await dp.start_polling(bot)
+    SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path=WEBHOOK_PATH)
+    setup_application(app, dp, bot=bot, on_startup=on_startup)
 
-    asyncio.run(main())
+    web.run_app(app, host="0.0.0.0", port=8000)
