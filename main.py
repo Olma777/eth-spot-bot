@@ -7,11 +7,13 @@ from email.mime.base import MIMEBase
 from email.mime.text import MIMEText
 from email import encoders
 from datetime import datetime
-from aiogram import Bot, Dispatcher, F
-from aiogram.types import Message
+from aiogram import Bot, Dispatcher, F, Router
+from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 from aiohttp import web
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.methods import GetWebhookInfo
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 # SMTP-переменные через Render Environment
 SMTP_USER = os.getenv("SMTP_USER")
@@ -21,7 +23,6 @@ SMTP_PORT = int(os.getenv("SMTP_PORT", 587))
 
 SUPPORTED_TOKENS = ["ETH", "DOT", "AVAX", "RENDER"]
 
-# Базовые настройки бота
 API_TOKEN = os.getenv("BOT_TOKEN")
 WEBHOOK_HOST = os.getenv("WEBHOOK_HOST")
 WEBHOOK_PATH = "/webhook"
@@ -30,6 +31,11 @@ WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
 bot = Bot(token=API_TOKEN)
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
+router = Router()
+dp.include_router(router)
+
+scheduler = AsyncIOScheduler()
+scheduler.start()
 
 # Healthcheck endpoint
 async def healthcheck(request):
@@ -37,8 +43,6 @@ async def healthcheck(request):
 
 app = web.Application()
 app.router.add_get("/healthz", healthcheck)
-
-# Загрузка и сохранение истории
 
 def load_data(token):
     try:
@@ -51,15 +55,24 @@ def save_data(token, data):
     with open(f"{token}.json", "w") as f:
         json.dump(data, f, indent=2)
 
-# Email-функция
+def export_to_excel(token):
+    data = load_data(token)
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = f"{token}_history"
+    ws.append(["Дата", "Тип", "Цена", "Кол-во"])
+    for entry in data['history']:
+        ws.append([entry.get("time", "-"), entry['action'], entry['price'], entry['amount']])
+    filename = f"{token}_history.xlsx"
+    wb.save(filename)
+    return filename
+
 async def send_email_with_attachment(to_email, subject, body, file_path):
     msg = MIMEMultipart()
     msg['From'] = SMTP_USER
     msg['To'] = to_email
     msg['Subject'] = subject
-
     msg.attach(MIMEText(body, 'plain'))
-
     part = MIMEBase('application', 'octet-stream')
     with open(file_path, 'rb') as f:
         part.set_payload(f.read())
@@ -72,43 +85,42 @@ async def send_email_with_attachment(to_email, subject, body, file_path):
         server.login(SMTP_USER, SMTP_PASS)
         server.send_message(msg)
 
-# Команда отправки email
-@dp.message(F.text.startswith("/send_email"))
-async def send_email_cmd(message: Message):
-    try:
-        parts = message.text.strip().split()
-        if len(parts) < 3:
-            await message.answer("Формат: /send_email TOKEN EMAIL")
-            return
+@router.message(F.text == "/send_email")
+async def choose_token(message: Message):
+    buttons = [[InlineKeyboardButton(text=t, callback_data=f"send:{t}")] for t in SUPPORTED_TOKENS]
+    keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
+    await message.answer("Выбери токен для отправки отчёта:", reply_markup=keyboard)
 
-        token = parts[1].upper()
-        email = parts[2]
+@router.callback_query(F.data.startswith("send:"))
+async def token_selected(callback_query):
+    token = callback_query.data.split(":")[1]
+    email = callback_query.from_user.username + "@gmail.com"  # временно, можно изменить
+    file_path = export_to_excel(token)
+    await send_email_with_attachment(
+        to_email=email,
+        subject=f"Отчёт по {token}",
+        body="Ваш отчёт прилагается во вложении.",
+        file_path=file_path
+    )
+    await callback_query.message.answer(f"📧 Отчёт по {token} отправлен на {email}!")
 
-        if token not in SUPPORTED_TOKENS:
-            await message.answer("Неподдерживаемый токен. Доступны: ETH, DOT, AVAX, RENDER")
-            return
+@router.message(F.text.startswith("/webhook_info"))
+async def webhook_info(message: Message):
+    info = await bot(GetWebhookInfo())
+    await message.answer(f"Webhook URL: {info.url}\nHas custom cert: {info.has_custom_certificate}\nPending updates: {info.pending_update_count}")
 
-        data = load_data(token)
-        wb = openpyxl.Workbook()
-        ws = wb.active
-        ws.title = f"{token}_history"
-        ws.append(["Дата", "Тип", "Цена", "Кол-во"])
-        for entry in data['history']:
-            ws.append([entry.get("time", "-"), entry['action'], entry['price'], entry['amount']])
-        filename = f"{token}_history.xlsx"
-        wb.save(filename)
+# Пример отправки отчёта каждое утро в 9:00
+for token in SUPPORTED_TOKENS:
+    scheduler.add_job(
+        lambda t=token: send_email_with_attachment(
+            to_email="dancryptodan@gmail.com",
+            subject=f"Утренний отчёт {t}",
+            body="Ваш запланированный отчёт прилагается во вложении.",
+            file_path=export_to_excel(t)
+        ),
+        trigger='cron', hour=9, minute=0
+    )
 
-        await send_email_with_attachment(
-            to_email=email,
-            subject=f"История {token} — {datetime.now().strftime('%Y-%m-%d')}",
-            body="Автоотчёт от твоего трейдинг-бота.",
-            file_path=filename
-        )
-        await message.answer(f"📧 Отчёт по {token} отправлен на {email}!")
-    except Exception as e:
-        await message.answer(f"Ошибка при отправке email: {e}")
-
-# Запуск aiohttp + Webhook
 if __name__ == '__main__':
     import asyncio
 
