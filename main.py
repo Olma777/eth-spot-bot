@@ -13,6 +13,8 @@ from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_applicati
 from aiohttp import web
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.methods import GetWebhookInfo
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import StatesGroup, State
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 # SMTP-переменные через Render Environment
@@ -36,6 +38,12 @@ dp.include_router(router)
 
 scheduler = AsyncIOScheduler()
 scheduler.start()
+
+# Состояния FSM для email отправки
+class EmailReport(StatesGroup):
+    waiting_for_email = State()
+
+selected_token = {}
 
 # Healthcheck endpoint
 async def healthcheck(request):
@@ -86,23 +94,35 @@ async def send_email_with_attachment(to_email, subject, body, file_path):
         server.send_message(msg)
 
 @router.message(F.text == "/send_email")
-async def choose_token(message: Message):
+async def choose_token(message: Message, state: FSMContext):
     buttons = [[InlineKeyboardButton(text=t, callback_data=f"send:{t}")] for t in SUPPORTED_TOKENS]
     keyboard = InlineKeyboardMarkup(inline_keyboard=buttons)
     await message.answer("Выбери токен для отправки отчёта:", reply_markup=keyboard)
 
 @router.callback_query(F.data.startswith("send:"))
-async def token_selected(callback_query):
+async def token_selected(callback_query, state: FSMContext):
     token = callback_query.data.split(":")[1]
-    email = callback_query.from_user.username + "@gmail.com"  # временно, можно изменить
+    selected_token[callback_query.from_user.id] = token
+    await callback_query.message.answer("Введите email, на который отправить отчёт:")
+    await state.set_state(EmailReport.waiting_for_email)
+
+@router.message(EmailReport.waiting_for_email)
+async def process_email(message: Message, state: FSMContext):
+    email = message.text.strip()
+    user_id = message.from_user.id
+    token = selected_token.get(user_id)
     file_path = export_to_excel(token)
-    await send_email_with_attachment(
-        to_email=email,
-        subject=f"Отчёт по {token}",
-        body="Ваш отчёт прилагается во вложении.",
-        file_path=file_path
-    )
-    await callback_query.message.answer(f"📧 Отчёт по {token} отправлен на {email}!")
+    try:
+        await send_email_with_attachment(
+            to_email=email,
+            subject=f"Отчёт по {token}",
+            body="Ваш отчёт прилагается во вложении.",
+            file_path=file_path
+        )
+        await message.answer(f"📧 Отчёт по {token} отправлен на {email}!")
+    except Exception as e:
+        await message.answer(f"Ошибка при отправке: {e}")
+    await state.clear()
 
 @router.message(F.text.startswith("/webhook_info"))
 async def webhook_info(message: Message):
