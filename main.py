@@ -6,9 +6,8 @@ from email.mime.base import MIMEBase
 from email.mime.text import MIMEText
 from email import encoders
 from datetime import datetime
-from aiogram import types
+from aiogram import types, F
 from aiogram.types import Message
-from aiogram.dispatcher.filters import Text
 
 # SMTP-переменные через Render Environment
 SMTP_USER = os.getenv("SMTP_USER")
@@ -51,7 +50,7 @@ async def send_email_with_attachment(to_email, subject, body, file_path):
         server.login(SMTP_USER, SMTP_PASS)
         server.send_message(msg)
 
-@dp.message(lambda message: message.text.startswith("/send_email"))
+@dp.message(F.text.startswith("/send_email"))
 async def send_email_cmd(message: Message):
     try:
         parts = message.text.strip().split()
