@@ -1,8 +1,140 @@
-from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
+import os
+import smtplib
+import openpyxl
+import json
+from aiohttp import web
+from email.mime.multipart import MIMEMultipart
+from email.mime.base import MIMEBase
+from email.mime.text import MIMEText
+from email import encoders
+from aiogram import Bot, Dispatcher, types
+from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import StatesGroup, State
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.dispatcher.router import Router
+from aiogram.methods import GetWebhookInfo
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-async def on_startup(app):
+# === Переменные окружения ===
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+SMTP_USER = os.getenv("SMTP_USER")
+SMTP_PASS = os.getenv("SMTP_PASS")
+SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
+SMTP_PORT = int(os.getenv("SMTP_PORT", 587))
+WEBHOOK_HOST = os.getenv("WEBHOOK_HOST")  # https://cryptotradebot.onrender.com
+WEBHOOK_PATH = "/webhook"
+WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
+
+SUPPORTED_TOKENS = ["ETH", "DOT", "AVAX", "RENDER"]
+
+# === Инициализация ===
+bot = Bot(token=BOT_TOKEN)
+storage = MemoryStorage()
+dp = Dispatcher(storage=storage)
+router = Router()
+dp.include_router(router)
+scheduler = AsyncIOScheduler()
+
+# === FSM ===
+class EmailReport(StatesGroup):
+    waiting_for_email = State()
+
+selected_token = {}
+
+# === Работа с файлами Excel ===
+def load_data(token):
+    try:
+        with open(f"{token}.json", "r") as f:
+            return json.load(f)
+    except:
+        return {"avg_price": 0, "eth_total": 0, "usdt_total": 0, "history": []}
+
+def export_to_excel(token):
+    data = load_data(token)
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = f"{token}_history"
+    ws.append(["Дата", "Тип", "Цена", "Кол-во"])
+    for entry in data["history"]:
+        ws.append([entry.get("time", "-"), entry["action"], entry["price"], entry["amount"]])
+    filename = f"{token}_history.xlsx"
+    wb.save(filename)
+    return filename
+
+# === Email ===
+async def send_email_with_attachment(to_email, subject, body, file_path):
+    msg = MIMEMultipart()
+    msg["From"] = SMTP_USER
+    msg["To"] = to_email
+    msg["Subject"] = subject
+    msg.attach(MIMEText(body, "plain"))
+
+    part = MIMEBase("application", "octet-stream")
+    with open(file_path, "rb") as f:
+        part.set_payload(f.read())
+    encoders.encode_base64(part)
+    part.add_header("Content-Disposition", f'attachment; filename="{os.path.basename(file_path)}"')
+    msg.attach(part)
+
+    with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+        server.starttls()
+        server.login(SMTP_USER, SMTP_PASS)
+        server.send_message(msg)
+
+# === Команды ===
+@router.message()
+async def fallback(message: types.Message, state: FSMContext):
+    if message.text == "/send_email":
+        buttons = [[InlineKeyboardButton(text=t, callback_data=f"send:{t}")] for t in SUPPORTED_TOKENS]
+        markup = InlineKeyboardMarkup(inline_keyboard=buttons)
+        await message.answer("Выбери токен:", reply_markup=markup)
+
+    elif message.text == "/webhook_info":
+        info = await bot(GetWebhookInfo())
+        await message.answer(f"Webhook URL: {info.url or 'не установлен'}")
+
+@router.callback_query()
+async def callbacks(call: types.CallbackQuery, state: FSMContext):
+    if call.data.startswith("send:"):
+        token = call.data.split(":")[1]
+        selected_token[call.from_user.id] = token
+        await call.message.answer("Введите email:")
+        await state.set_state(EmailReport.waiting_for_email)
+
+@router.message(EmailReport.waiting_for_email)
+async def get_email(message: types.Message, state: FSMContext):
+    email = message.text.strip()
+    token = selected_token.get(message.from_user.id)
+    file_path = export_to_excel(token)
+    try:
+        await send_email_with_attachment(email, f"Отчёт по {token}", "Отчёт прилагается.", file_path)
+        await message.answer(f"✅ Отчёт по {token} отправлен на {email}")
+    except Exception as e:
+        await message.answer(f"❌ Ошибка: {e}")
+    await state.clear()
+
+# === Обработка webhook ===
+async def handle_webhook(request):
+    body = await request.json()
+    update = types.Update(**body)
+    await dp.feed_update(bot, update)
+    return web.Response()
+
+# === Healthcheck ===
+async def healthcheck(request):
+    return web.Response(text="OK")
+
+# === Приложение ===
+app = web.Application()
+app.router.add_post(WEBHOOK_PATH, handle_webhook)
+app.router.add_get("/healthz", healthcheck)
+
+# === Startup ===
+async def on_startup():
     await bot.set_webhook(WEBHOOK_URL)
 
+    # Автоотчёты по расписанию
     for token in SUPPORTED_TOKENS:
         scheduler.add_job(
             lambda t=token: send_email_with_attachment(
@@ -17,17 +149,12 @@ async def on_startup(app):
         )
     scheduler.start()
 
-async def main():
-    app = web.Application()
-    app.router.add_post(WEBHOOK_PATH, handle_webhook)
-    app.router.add_get("/healthz", healthcheck)
-
-    # Привязываем webhook dispatcher к приложению
-    SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path=WEBHOOK_PATH)
-    app.on_startup.append(on_startup)
-    setup_application(app, dp)
-
-    return app
-
+# === Запуск ===
 if __name__ == "__main__":
-    web.run_app(main(), host="0.0.0.0", port=8000)
+    import asyncio
+
+    async def main():
+        await on_startup()
+        await dp.start_polling(bot)
+
+    web.run_app(app, host="0.0.0.0", port=8000)
