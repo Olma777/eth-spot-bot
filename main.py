@@ -2,6 +2,7 @@ import os
 import smtplib
 import openpyxl
 import json
+import logging
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email.mime.text import MIMEText
@@ -17,20 +18,20 @@ from aiogram.fsm.state import StatesGroup, State
 from aiogram.methods import GetWebhookInfo, SetWebhook
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-# ========== Переменные окружения ==========
+logging.basicConfig(level=logging.INFO)
+
 SMTP_USER = os.getenv("SMTP_USER")
 SMTP_PASS = os.getenv("SMTP_PASS")
 SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
 SMTP_PORT = int(os.getenv("SMTP_PORT", 587))
 
 API_TOKEN = os.getenv("BOT_TOKEN")
-WEBHOOK_HOST = os.getenv("WEBHOOK_HOST")  # https://ethspotbot.onrender.com
+WEBHOOK_HOST = os.getenv("WEBHOOK_HOST")
 WEBHOOK_PATH = "/webhook"
 WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
 
 SUPPORTED_TOKENS = ["ETH", "DOT", "AVAX", "RENDER"]
 
-# ========== Инициализация ==========
 bot = Bot(token=API_TOKEN)
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
@@ -40,20 +41,17 @@ dp.include_router(router)
 scheduler = AsyncIOScheduler()
 scheduler.start()
 
-# ========== FSM ==========
 class EmailReport(StatesGroup):
     waiting_for_email = State()
 
 selected_token = {}
 
-# ========== Healthcheck ==========
 async def healthcheck(request):
     return web.Response(text="OK")
 
 app = web.Application()
 app.router.add_get("/healthz", healthcheck)
 
-# ========== Работа с данными ==========
 def load_data(token):
     try:
         with open(f"{token}.json", "r") as f:
@@ -77,7 +75,6 @@ def export_to_excel(token):
     wb.save(filename)
     return filename
 
-# ========== Email ==========
 async def send_email_with_attachment(to_email, subject, body, file_path):
     msg = MIMEMultipart()
     msg['From'] = SMTP_USER
@@ -96,7 +93,6 @@ async def send_email_with_attachment(to_email, subject, body, file_path):
         server.login(SMTP_USER, SMTP_PASS)
         server.send_message(msg)
 
-# ========== Хендлеры ==========
 @router.message(F.text == "/send_email")
 async def choose_token(message: Message, state: FSMContext):
     buttons = [[InlineKeyboardButton(text=t, callback_data=f"send:{t}")] for t in SUPPORTED_TOKENS]
@@ -137,7 +133,11 @@ async def webhook_info(message: Message):
         f"Pending updates: {info.pending_update_count}"
     )
 
-# ========== Утренние автоотчёты ==========
+@router.message()
+async def log_any_message(message: Message):
+    logging.info(f"📥 Получено сообщение: {message.text}")
+    await message.answer("✅ Я получил твоё сообщение.")
+
 for token in SUPPORTED_TOKENS:
     scheduler.add_job(
         lambda t=token: send_email_with_attachment(
@@ -149,12 +149,16 @@ for token in SUPPORTED_TOKENS:
         trigger='cron', hour=9, minute=0
     )
 
-# ========== Запуск приложения ==========
 if __name__ == '__main__':
     import asyncio
 
     async def on_startup(dispatcher: Dispatcher, bot: Bot):
-        await bot(SetWebhook(url=WEBHOOK_URL))
+        logging.info(f"📡 Устанавливаем webhook: {WEBHOOK_URL}")
+        try:
+            result = await bot(SetWebhook(url=WEBHOOK_URL))
+            logging.info(f"✅ Webhook установлен: {result}")
+        except Exception as e:
+            logging.error(f"❌ Ошибка при установке webhook: {e}")
 
     SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path=WEBHOOK_PATH)
     setup_application(app, dp, bot=bot, on_startup=on_startup)
