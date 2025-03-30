@@ -1,6 +1,5 @@
-aiogram==3.3.0
+aiogram==3.1.1
 aiohttp
 openpyxl
 apscheduler
-
 
