@@ -153,7 +153,7 @@ async def on_startup():
 # === Запуск ===
 if __name__ == "__main__":
     import asyncio
-    from aiogram import asyncio as aio
+    import asyncio
 
     async def main():
         await on_startup()
