@@ -1,7 +1,7 @@
 import os
+import json
 import smtplib
 import openpyxl
-import json
 from aiohttp import web
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
@@ -114,7 +114,7 @@ async def get_email(message: types.Message, state: FSMContext):
         await message.answer(f"❌ Ошибка: {e}")
     await state.clear()
 
-# === Обработка webhook ===
+# === Обработка Webhook ===
 async def handle_webhook(request):
     body = await request.json()
     update = types.Update(**body)
@@ -125,16 +125,11 @@ async def handle_webhook(request):
 async def healthcheck(request):
     return web.Response(text="OK")
 
-# === Приложение ===
-app = web.Application()
-app.router.add_post(WEBHOOK_PATH, handle_webhook)
-app.router.add_get("/healthz", healthcheck)
-
 # === Startup ===
 async def on_startup():
     await bot.set_webhook(WEBHOOK_URL)
 
-    # Автоотчёты по расписанию
+    # Планировщик автоотчётов
     for token in SUPPORTED_TOKENS:
         scheduler.add_job(
             lambda t=token: send_email_with_attachment(
@@ -153,8 +148,13 @@ async def on_startup():
 if __name__ == "__main__":
     import asyncio
 
-    async def main():
+    async def startup():
         await on_startup()
-        await dp.start_polling(bot)
 
+    app = web.Application()
+    app.router.add_post(WEBHOOK_PATH, handle_webhook)
+    app.router.add_get("/healthz", healthcheck)
+
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(startup())
     web.run_app(app, host="0.0.0.0", port=8000)
