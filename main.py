@@ -17,17 +17,18 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-# 🛠️ Конфигурация из переменных окружения
-SMTP_USER = os.getenv("SMTP_USER")  # dancryptodan@gmail.com
-SMTP_PASS = os.getenv("SMTP_PASS")  # app password
+# SMTP-конфигурация
+SMTP_USER = os.getenv("SMTP_USER")
+SMTP_PASS = os.getenv("SMTP_PASS")
 SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
 SMTP_PORT = int(os.getenv("SMTP_PORT", 587))
-API_TOKEN = os.getenv("BOT_TOKEN")
-WEBHOOK_HOST = os.getenv("WEBHOOK_HOST")
-WEBHOOK_PATH = "/webhook"
-WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
 
 SUPPORTED_TOKENS = ["ETH", "DOT", "AVAX", "RENDER"]
+
+API_TOKEN = os.getenv("BOT_TOKEN")
+WEBHOOK_HOST = os.getenv("WEBHOOK_HOST")  # пример: https://yourapp.onrender.com
+WEBHOOK_PATH = "/webhook"
+WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
 
 bot = Bot(token=API_TOKEN)
 storage = MemoryStorage()
@@ -36,22 +37,22 @@ router = Router()
 dp.include_router(router)
 
 scheduler = AsyncIOScheduler()
-scheduler.start()
 
-# 📦 Состояние FSM
+# Состояния FSM
 class EmailReport(StatesGroup):
     waiting_for_email = State()
 
 selected_token = {}
 
-# ✅ Healthcheck endpoint
+# Healthcheck
 async def healthcheck(request):
     return web.Response(text="OK")
 
+# Приложение aiohttp
 app = web.Application()
 app.router.add_get("/healthz", healthcheck)
 
-# 📊 Загрузка и сохранение данных
+# Загрузка/сохранение истории
 def load_data(token):
     try:
         with open(f"{token}.json", "r") as f:
@@ -75,7 +76,6 @@ def export_to_excel(token):
     wb.save(filename)
     return filename
 
-# 📧 Отправка email
 async def send_email_with_attachment(to_email, subject, body, file_path):
     msg = MIMEMultipart()
     msg['From'] = SMTP_USER
@@ -95,7 +95,7 @@ async def send_email_with_attachment(to_email, subject, body, file_path):
         server.login(SMTP_USER, SMTP_PASS)
         server.send_message(msg)
 
-# 🔘 Команды и колбэки
+# Хендлеры
 @router.message(F.text == "/send_email")
 async def choose_token(message: Message, state: FSMContext):
     buttons = [[InlineKeyboardButton(text=t, callback_data=f"send:{t}")] for t in SUPPORTED_TOKENS]
@@ -124,38 +124,33 @@ async def process_email(message: Message, state: FSMContext):
         )
         await message.answer(f"📧 Отчёт по {token} отправлен на {email}!")
     except Exception as e:
-        await message.answer(f"❌ Ошибка при отправке: {e}")
+        await message.answer(f"Ошибка при отправке: {e}")
     await state.clear()
 
-# 📡 Информация о вебхуке
 @router.message(F.text.startswith("/webhook_info"))
 async def webhook_info(message: Message):
     info = await bot(GetWebhookInfo())
-    await message.answer(
-        f"Webhook URL: {info.url or 'не установлен'}\n"
-        f"Has custom cert: {info.has_custom_certificate}\n"
-        f"Pending updates: {info.pending_update_count}"
-    )
+    await message.answer(f"Webhook URL: {info.url}\nHas custom cert: {info.has_custom_certificate}\nPending updates: {info.pending_update_count}")
 
-# ⏰ Автоматическая отправка отчётов
-for token in SUPPORTED_TOKENS:
-    scheduler.add_job(
-        lambda t=token: send_email_with_attachment(
-            to_email="dancryptodan@gmail.com",
-            subject=f"Утренний отчёт {t}",
-            body="Ваш запланированный отчёт прилагается во вложении.",
-            file_path=export_to_excel(t)
-        ),
-        trigger='cron', hour=9, minute=0
-    )
+# on_startup
+async def on_startup(dispatcher: Dispatcher, bot: Bot):
+    await bot.set_webhook(WEBHOOK_URL)
 
-# 🚀 Запуск
+    # Планировщик на каждый токен
+    for token in SUPPORTED_TOKENS:
+        scheduler.add_job(
+            lambda t=token: send_email_with_attachment(
+                to_email="dancryptodan@gmail.com",
+                subject=f"Утренний отчёт {t}",
+                body="Ваш запланированный отчёт прилагается во вложении.",
+                file_path=export_to_excel(t)
+            ),
+            trigger='cron', hour=9, minute=0
+        )
+    scheduler.start()
+
+# Запуск
 if __name__ == '__main__':
-    import asyncio
-
-    async def on_startup(dispatcher: Dispatcher, bot: Bot):
-        await bot.set_webhook(WEBHOOK_URL)
-
     SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path=WEBHOOK_PATH)
     setup_application(app, dp, bot=bot, on_startup=on_startup)
     web.run_app(app, host="0.0.0.0", port=8000)
