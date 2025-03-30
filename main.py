@@ -6,15 +6,16 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
 from email.mime.text import MIMEText
 from email import encoders
-
+from datetime import datetime
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
+from aiohttp import web
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.methods import GetWebhookInfo
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
+from aiogram.methods import GetWebhookInfo, SetWebhook
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-import asyncio
 
 # ========== Переменные окружения ==========
 SMTP_USER = os.getenv("SMTP_USER")
@@ -23,6 +24,9 @@ SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
 SMTP_PORT = int(os.getenv("SMTP_PORT", 587))
 
 API_TOKEN = os.getenv("BOT_TOKEN")
+WEBHOOK_HOST = os.getenv("WEBHOOK_HOST")  # https://ethspotbot.onrender.com
+WEBHOOK_PATH = "/webhook"
+WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
 
 SUPPORTED_TOKENS = ["ETH", "DOT", "AVAX", "RENDER"]
 
@@ -41,6 +45,13 @@ class EmailReport(StatesGroup):
     waiting_for_email = State()
 
 selected_token = {}
+
+# ========== Healthcheck ==========
+async def healthcheck(request):
+    return web.Response(text="OK")
+
+app = web.Application()
+app.router.add_get("/healthz", healthcheck)
 
 # ========== Работа с данными ==========
 def load_data(token):
@@ -69,16 +80,15 @@ def export_to_excel(token):
 # ========== Email ==========
 async def send_email_with_attachment(to_email, subject, body, file_path):
     msg = MIMEMultipart()
-    msg["From"] = SMTP_USER
-    msg["To"] = to_email
-    msg["Subject"] = subject
-    msg.attach(MIMEText(body, "plain"))
-
-    part = MIMEBase("application", "octet-stream")
-    with open(file_path, "rb") as f:
+    msg['From'] = SMTP_USER
+    msg['To'] = to_email
+    msg['Subject'] = subject
+    msg.attach(MIMEText(body, 'plain'))
+    part = MIMEBase('application', 'octet-stream')
+    with open(file_path, 'rb') as f:
         part.set_payload(f.read())
     encoders.encode_base64(part)
-    part.add_header("Content-Disposition", f"attachment; filename={os.path.basename(file_path)}")
+    part.add_header('Content-Disposition', f'attachment; filename={os.path.basename(file_path)}')
     msg.attach(part)
 
     with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
@@ -86,11 +96,7 @@ async def send_email_with_attachment(to_email, subject, body, file_path):
         server.login(SMTP_USER, SMTP_PASS)
         server.send_message(msg)
 
-# ========== Команды ==========
-@router.message(F.text == "/start")
-async def start_handler(message: Message):
-    await message.answer("Привет! Я бот-аналитик. Напиши /send_email, чтобы получить отчёт.")
-
+# ========== Хендлеры ==========
 @router.message(F.text == "/send_email")
 async def choose_token(message: Message, state: FSMContext):
     buttons = [[InlineKeyboardButton(text=t, callback_data=f"send:{t}")] for t in SUPPORTED_TOKENS]
@@ -119,15 +125,19 @@ async def process_email(message: Message, state: FSMContext):
         )
         await message.answer(f"📧 Отчёт по {token} отправлен на {email}!")
     except Exception as e:
-        await message.answer(f"❌ Ошибка при отправке: {e}")
+        await message.answer(f"Ошибка при отправке: {e}")
     await state.clear()
 
 @router.message(F.text.startswith("/webhook_info"))
 async def webhook_info(message: Message):
     info = await bot(GetWebhookInfo())
-    await message.answer(f"Webhook URL: {info.url}\nHas custom cert: {info.has_custom_certificate}\nPending updates: {info.pending_update_count}")
+    await message.answer(
+        f"Webhook URL: {info.url or 'не установлен'}\n"
+        f"Has custom cert: {info.has_custom_certificate}\n"
+        f"Pending updates: {info.pending_update_count}"
+    )
 
-# ========== Автоотчёты ==========
+# ========== Утренние автоотчёты ==========
 for token in SUPPORTED_TOKENS:
     scheduler.add_job(
         lambda t=token: send_email_with_attachment(
@@ -139,10 +149,13 @@ for token in SUPPORTED_TOKENS:
         trigger='cron', hour=9, minute=0
     )
 
-# ========== Запуск Polling ==========
-if __name__ == "__main__":
-    async def main():
-        print("🤖 Бот запущен в режиме polling")
-        await dp.start_polling(bot)
+# ========== Запуск приложения ==========
+if __name__ == '__main__':
+    import asyncio
 
-    asyncio.run(main())
+    async def on_startup(dispatcher: Dispatcher, bot: Bot):
+        await bot(SetWebhook(url=WEBHOOK_URL))
+
+    SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path=WEBHOOK_PATH)
+    setup_application(app, dp, bot=bot, on_startup=on_startup)
+    web.run_app(app, host="0.0.0.0", port=8000)
