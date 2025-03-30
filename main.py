@@ -151,3 +151,19 @@ if __name__ == '__main__':
     setup_application(app, dp, bot=bot, on_startup=on_startup)
 
     web.run_app(app, host="0.0.0.0", port=8000)
+if __name__ == '__main__':
+    import asyncio
+
+    async def start_bot():
+        # Удалим старый webhook и установим новый
+        await bot.delete_webhook(drop_pending_updates=True)
+        await bot.set_webhook(WEBHOOK_URL)
+        print("✅ Webhook установлен:", WEBHOOK_URL)
+
+        # Запуск веб-сервера
+        SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path=WEBHOOK_PATH)
+        setup_application(app, dp, bot=bot)
+
+        web.run_app(app, host="0.0.0.0", port=8000)
+
+    asyncio.run(start_bot())
