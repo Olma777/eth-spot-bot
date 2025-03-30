@@ -1,4 +1,6 @@
 aiogram==3.4.1
-aiohttp==3.9.3
-openpyxl==3.1.2
-apscheduler==3.10.1
+aiohttp
+openpyxl
+python-dotenv
+apscheduler
+
