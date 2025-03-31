@@ -126,6 +126,25 @@ async def handle_webhook(request):
     return web.Response(text="ok")
 
 # === Приложение ===
+# === Healthcheck ===
+async def healthcheck(request):
+    return web.Response(text="OK")
+
+# === Webhook endpoint ===
+async def handle_webhook(request):
+    try:
+        print("📩 Вызван webhook от Telegram")
+        body = await request.json()
+        update = types.Update(**body)
+        await dp.feed_update(bot, update)
+    except Exception as e:
+        print(f"[Webhook Error] {e}")
+    return web.Response(text="ok")
+
+# === Приложение ===
+app = web.Application()
+app.router.add_post(WEBHOOK_PATH, handle_webhook)
+app.router.add_get("/healthz", healthcheck)
 app = web.Application()
 app.router.add_post(WEBHOOK_PATH, handle_webhook)
 app.router.add_get("/healthz", healthcheck)
