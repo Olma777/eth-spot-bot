@@ -159,7 +159,6 @@ if __name__ == "__main__":
 
     async def main():
         await on_startup()
-        scheduler.start()
         runner = web.AppRunner(app)
         await runner.setup()
         site = web.TCPSite(runner, "0.0.0.0", 8000)
