@@ -113,13 +113,13 @@ async def get_email(message: types.Message, state: FSMContext):
         await message.answer(f"❌ Ошибка: {e}")
     await state.clear()
 
-# === Webhook ===
+# === Webhook обработка ===
 async def handle_webhook(request):
     try:
+        print("📩 Вызван webhook от Telegram")
         body = await request.json()
         update = types.Update(**body)
         await dp.feed_update(bot, update)
-        print("📩 Получено обновление от Telegram")
     except Exception as e:
         print(f"[Webhook Error] {e}")
     return web.Response(text="ok")
@@ -136,14 +136,14 @@ app.router.add_get("/healthz", healthcheck)
 # === Startup ===
 async def on_startup():
     await bot.set_webhook(WEBHOOK_URL)
-    print(f"✅ Webhook установлен: {WEBHOOK_URL}")
+    print(f"Webhook установлен: {WEBHOOK_URL}")
 
     for token in SUPPORTED_TOKENS:
         scheduler.add_job(
             lambda t=token: send_email_with_attachment(
                 "dancryptodan@gmail.com",
                 f"Автоотчёт {t}",
-                "Отчёт во вложении.",
+                "Отчёт прилагается.",
                 export_to_excel(t)
             ),
             trigger="cron",
@@ -162,7 +162,7 @@ if __name__ == "__main__":
         await runner.setup()
         site = web.TCPSite(runner, "0.0.0.0", 8000)
         await site.start()
-        print("🚀 Webhook сервер запущен на порту 8000")
+        print("🚀 Webhook сервер запущен.")
 
         while True:
             await asyncio.sleep(3600)
