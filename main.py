@@ -117,15 +117,13 @@ async def get_email(message: types.Message, state: FSMContext):
 # === Webhook обработка ===
 async def handle_webhook(request):
     try:
+        print("📩 Вызван webhook от Telegram")  # ← ВСТАВЬ ЭТУ СТРОЧКУ ЗДЕСЬ
         body = await request.json()
         update = types.Update(**body)
         await dp.feed_update(bot, update)
     except Exception as e:
         print(f"[Webhook Error] {e}")
     return web.Response(text="ok")
-
-async def healthcheck(request):
-    return web.Response(text="OK")
 
 # === Приложение ===
 app = web.Application()
