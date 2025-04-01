@@ -9,13 +9,11 @@ from email.mime.text import MIMEText
 from email import encoders
 
 from aiogram import Bot, Dispatcher, types, Router
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.methods import GetWebhookInfo
-
-import asyncio
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 # === Переменные окружения ===
@@ -24,29 +22,25 @@ SMTP_USER = os.getenv("SMTP_USER")
 SMTP_PASS = os.getenv("SMTP_PASS")
 SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
 SMTP_PORT = int(os.getenv("SMTP_PORT", 587))
-WEBHOOK_HOST = os.getenv("WEBHOOK_HOST")  # https://cryptotradebot.onrender.com
+WEBHOOK_HOST = os.getenv("WEBHOOK_HOST")  # https://cryptotradebot-fs1s.onrender.com
 WEBHOOK_PATH = "/webhook"
 WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
-
 SUPPORTED_TOKENS = ["ETH", "DOT", "AVAX", "RENDER"]
 
 # === Инициализация ===
-print("🌀 Инициализация бота...")
 bot = Bot(BOT_TOKEN)
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 router = Router()
 dp.include_router(router)
 scheduler = AsyncIOScheduler()
-print("✅ Бот и диспетчер инициализированы")
 
-# === FSM ===
 class EmailReport(StatesGroup):
     waiting_for_email = State()
 
 selected_token = {}
 
-# === Работа с Excel ===
+# === Excel ===
 def load_data(token):
     try:
         with open(f"{token}.json", "r") as f:
@@ -66,7 +60,6 @@ def export_to_excel(token):
     wb.save(filename)
     return filename
 
-# === Email ===
 async def send_email_with_attachment(to_email, subject, body, file_path):
     msg = MIMEMultipart()
     msg["From"] = SMTP_USER
@@ -86,7 +79,6 @@ async def send_email_with_attachment(to_email, subject, body, file_path):
         server.login(SMTP_USER, SMTP_PASS)
         server.send_message(msg)
 
-# === Команды ===
 @router.message()
 async def handle_message(message: types.Message, state: FSMContext):
     if message.text == "/send_email":
@@ -119,8 +111,8 @@ async def get_email(message: types.Message, state: FSMContext):
 
 # === Webhook обработка ===
 async def handle_webhook(request):
-    print("📩 Получен webhook от Telegram")
     try:
+        print("📩 Вызван webhook от Telegram")
         body = await request.json()
         update = types.Update(**body)
         await dp.feed_update(bot, update)
@@ -130,21 +122,18 @@ async def handle_webhook(request):
 
 # === Healthcheck ===
 async def healthcheck(request):
-    print("💚 Вызван healthcheck endpoint")
+    print("🔍 Healthcheck вызван")
     return web.Response(text="OK")
 
 # === Приложение ===
-print("🛠 Создание веб-приложения")
 app = web.Application()
 app.router.add_post(WEBHOOK_PATH, handle_webhook)
 app.router.add_get("/healthz", healthcheck)
 
-# === Запуск сервера ===
+# === Startup ===
 async def on_startup():
-    print("⚙️ Установка webhook...")
     await bot.set_webhook(WEBHOOK_URL)
-    print(f"✅ Webhook установлен: {WEBHOOK_URL}")
-
+    print(f"🚀 Webhook установлен: {WEBHOOK_URL}")
     for token in SUPPORTED_TOKENS:
         scheduler.add_job(
             lambda t=token: send_email_with_attachment(
@@ -158,19 +147,18 @@ async def on_startup():
             minute=0
         )
     scheduler.start()
-    print("📅 Планировщик запущен")
 
+# === Запуск ===
 if __name__ == "__main__":
-    print("🚀 Запуск main()...")
+    import asyncio
+
     async def main():
         await on_startup()
-        print("🔧 Настройка AppRunner...")
         runner = web.AppRunner(app)
         await runner.setup()
-        print("🌍 Запуск TCPSite...")
         site = web.TCPSite(runner, "0.0.0.0", 8000)
         await site.start()
-        print("✅ Сервер запущен и слушает порт 8000.")
+        print("✅ Сервер aiohttp запущен на 0.0.0.0:8000")
         while True:
             await asyncio.sleep(3600)
 
