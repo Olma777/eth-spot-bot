@@ -16,18 +16,16 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.methods import GetWebhookInfo
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-# === Переменные окружения ===
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 SMTP_USER = os.getenv("SMTP_USER")
 SMTP_PASS = os.getenv("SMTP_PASS")
 SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
 SMTP_PORT = int(os.getenv("SMTP_PORT", 587))
-WEBHOOK_HOST = os.getenv("WEBHOOK_HOST")  # https://cryptotradebot-fs1s.onrender.com
+WEBHOOK_HOST = os.getenv("WEBHOOK_HOST")
 WEBHOOK_PATH = "/webhook"
 WEBHOOK_URL = f"{WEBHOOK_HOST}{WEBHOOK_PATH}"
 SUPPORTED_TOKENS = ["ETH", "DOT", "AVAX", "RENDER"]
 
-# === Инициализация ===
 bot = Bot(BOT_TOKEN)
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
@@ -40,7 +38,6 @@ class EmailReport(StatesGroup):
 
 selected_token = {}
 
-# === Excel ===
 def load_data(token):
     try:
         with open(f"{token}.json", "r") as f:
@@ -109,57 +106,30 @@ async def get_email(message: types.Message, state: FSMContext):
         await message.answer(f"❌ Ошибка: {e}")
     await state.clear()
 
-# === Webhook обработка ===
 async def handle_webhook(request):
     try:
-        print("📩 Вызван webhook от Telegram")
+        print("📩 Webhook received")
         body = await request.json()
         update = types.Update(**body)
         await dp.feed_update(bot, update)
     except Exception as e:
-        print(f"[Webhook Error] {e}")
+        print(f"❌ Webhook error: {e}")
     return web.Response(text="ok")
 
-# === Healthcheck ===
 async def healthcheck(request):
-    print("🔍 Healthcheck вызван")
+    print("✅ Healthcheck passed")
     return web.Response(text="OK")
 
-# === Приложение ===
 app = web.Application()
 app.router.add_post(WEBHOOK_PATH, handle_webhook)
 app.router.add_get("/healthz", healthcheck)
 
-# === Startup ===
-async def on_startup():
+async def on_startup(app):
     await bot.set_webhook(WEBHOOK_URL)
-    print(f"🚀 Webhook установлен: {WEBHOOK_URL}")
-    for token in SUPPORTED_TOKENS:
-        scheduler.add_job(
-            lambda t=token: send_email_with_attachment(
-                "dancryptodan@gmail.com",
-                f"Автоотчёт {t}",
-                "Отчёт прилагается.",
-                export_to_excel(t)
-            ),
-            trigger="cron",
-            hour=9,
-            minute=0
-        )
+    print(f"🔗 Webhook set to: {WEBHOOK_URL}")
     scheduler.start()
 
-# === Запуск ===
+app.on_startup.append(on_startup)
+
 if __name__ == "__main__":
-    import asyncio
-
-    async def main():
-        await on_startup()
-        runner = web.AppRunner(app)
-        await runner.setup()
-        site = web.TCPSite(runner, "0.0.0.0", 8000)
-        await site.start()
-        print("✅ Сервер aiohttp запущен на 0.0.0.0:8000")
-        while True:
-            await asyncio.sleep(3600)
-
-    asyncio.run(main())
+    web.run_app(app, host="0.0.0.0", port=8000)
