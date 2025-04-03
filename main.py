@@ -7,7 +7,7 @@ from smtplib import SMTP, SMTP_SSL
 from email.message import EmailMessage
 
 from aiogram import Bot, Dispatcher, types, F, Router
-from aiogram.filters import CommandStart, Command
+from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
