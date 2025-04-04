@@ -175,7 +175,8 @@ async def healthcheck(request):
     return web.Response(text="OK")
 
 # Webhook
-async def on_startup(bot: Bot, dispatcher: Dispatcher, webhook_url: str):
+async def on_startup(bot: Bot):
+    webhook_url = f"{WEBHOOK_HOST}/webhook"
     await bot.set_webhook(webhook_url)
 
 async def main():
@@ -184,8 +185,7 @@ async def main():
     webhook_requests_handler.register(app, path="/webhook")
     setup_application(app, dp, bot=bot)
     app.router.add_get("/healthz", healthcheck)
-    webhook_url = f"{WEBHOOK_HOST}/webhook"
-    dp.startup.register(on_startup, webhook_url=webhook_url)
+    dp.startup.register(on_startup)
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, "0.0.0.0", int(os.environ.get("PORT", 8080)))
