@@ -98,23 +98,32 @@ async def send_email(email, filename, token):
 @router.message(CommandStart())
 async def cmd_start(message: types.Message):
     logging.info(f"Получена команда /start от {message.from_user.id}")
-    await message.answer("Привет! Выберите токен для работы:", reply_markup=get_token_keyboard())
+    try:
+        await message.answer("Привет! Выберите токен для работы:", reply_markup=get_token_keyboard())
+    except Exception as e:
+        logging.error(f"Ошибка при обработке /start от {message.from_user.id}: {e}")
 
 # Обработчик выбора токена
 @router.callback_query(F.data.in_(TOKENS))
 async def process_token(callback: types.CallbackQuery, state: FSMContext):
     logging.info(f"Выбран токен {callback.data} от {callback.from_user.id}")
-    await state.update_data(token=callback.data)
-    await callback.message.answer(f"Выбран токен: {callback.data}. Что вы хотите сделать?", reply_markup=get_action_keyboard())
-    await callback.answer()
+    try:
+        await state.update_data(token=callback.data)
+        await callback.message.answer(f"Выбран токен: {callback.data}. Что вы хотите сделать?", reply_markup=get_action_keyboard())
+        await callback.answer()
+    except Exception as e:
+        logging.error(f"Ошибка при выборе токена {callback.data} от {callback.from_user.id}: {e}")
 
 # Обработчик выбора действия (добавить сделку)
 @router.callback_query(F.data == "add_trade")
 async def add_trade(callback: types.CallbackQuery, state: FSMContext):
     logging.info(f"Выбрано действие 'добавить сделку' от {callback.from_user.id}")
-    await callback.message.answer("Введите данные сделки в формате: тип (buy/sell), цена, объем.")
-    await state.set_state("add_trade_data")
-    await callback.answer()
+    try:
+        await callback.message.answer("Введите данные сделки в формате: тип (buy/sell), цена, объем.")
+        await state.set_state("add_trade_data")
+        await callback.answer()
+    except Exception as e:
+        logging.error(f"Ошибка при выборе действия 'добавить сделку' от {callback.from_user.id}: {e}")
 
 # Обработчик ввода данных сделки
 @router.message(F.text)
@@ -140,6 +149,9 @@ async def process_trade_data(message: types.Message, state: FSMContext):
         except ValueError:
             logging.error(f"Неверный формат ввода данных сделки от {message.from_user.id}")
             await message.answer("Неверный формат. Попробуйте снова.")
+        except Exception as e:
+            logging.error(f"Ошибка при обработке данных сделки от {message.from_user.id}: {e}")
+            await message.answer("Произошла ошибка, попробуйте позже.")
         await state.set_state(None)
     else:
         logging.warning(f"Попытка ввода данных сделки без выбора действия от {message.from_user.id}")
@@ -149,9 +161,12 @@ async def process_trade_data(message: types.Message, state: FSMContext):
 @router.callback_query(F.data == "get_report")
 async def get_report(callback: types.CallbackQuery, state: FSMContext):
     logging.info(f"Выбрано действие 'получить отчет' от {callback.from_user.id}")
-    await callback.message.answer("Введите ваш email для отправки отчета:")
-    await state.set_state(EmailState.email)
-    await callback.answer()
+    try:
+        await callback.message.answer("Введите ваш email для отправки отчета:")
+        await state.set_state(EmailState.email)
+        await callback.answer()
+    except Exception as e:
+        logging.error(f"Ошибка при выборе действия 'получить отчет' от {callback.from_user.id}: {e}")
 
 # Обработчик ввода email
 @router.message(F.text, EmailState.email)
@@ -162,12 +177,16 @@ async def process_email(message: types.Message, state: FSMContext):
         token = data["token"]
         trades = load_data(token)
         filename = generate_excel(token, trades)
-        if await send_email(email, filename, token):
-            logging.info(f"Отчет отправлен на {email} от {message.from_user.id}")
-            await message.answer("Отчет отправлен на ваш email.")
-        else:
-            logging.error(f"Ошибка при отправке отчета на {email} от {message.from_user.id}")
-            await message.answer("Ошибка при отправке отчета.")
+        try:
+            if await send_email(email, filename, token):
+                logging.info(f"Отчет отправлен на {email} от {message.from_user.id}")
+                await message.answer("Отчет отправлен на ваш email.")
+            else:
+                logging.error(f"Ошибка при отправке отчета на {email} от {message.from_user.id}")
+                await message.answer("Ошибка при отправке отчета.")
+        except Exception as e:
+            logging.error(f"Ошибка при обработке email от {message.from_user.id}: {e}")
+            await message.answer("Произошла ошибка, попробуйте позже.")
         os.remove(filename)
         await state.clear()
     else:
