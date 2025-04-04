@@ -107,26 +107,30 @@ async def add_trade(callback: types.CallbackQuery, state: FSMContext):
     await callback.answer()
 
 # Обработчик ввода данных сделки
-@router.message(F.text, state="add_trade_data")
+@router.message(F.text)
 async def process_trade_data(message: types.Message, state: FSMContext):
-    try:
-        trade_type, price, amount = message.text.split(",")
-        price, amount = float(price), float(amount)
-        data = await state.get_data()
-        token = data["token"]
-        trades = load_data(token)
-        trades.append({
-            "date": datetime.now().isoformat(),
-            "type": trade_type.strip().lower(),
-            "price": price,
-            "amount": amount
-        })
-        save_data(token, trades)
-        await message.answer("Сделка добавлена.")
-        await state.clear()
-    except ValueError:
-        await message.answer("Неверный формат. Попробуйте снова.")
-    await state.set_state(None)
+    current_state = await state.get_state()
+    if current_state == "add_trade_data":
+        try:
+            trade_type, price, amount = message.text.split(",")
+            price, amount = float(price), float(amount)
+            data = await state.get_data()
+            token = data["token"]
+            trades = load_data(token)
+            trades.append({
+                "date": datetime.now().isoformat(),
+                "type": trade_type.strip().lower(),
+                "price": price,
+                "amount": amount
+            })
+            save_data(token, trades)
+            await message.answer("Сделка добавлена.")
+            await state.clear()
+        except ValueError:
+            await message.answer("Неверный формат. Попробуйте снова.")
+        await state.set_state(None)
+    else:
+        await message.answer("Пожалуйста, сначала выберите операцию добавления сделки.")
 
 # Обработчик выбора действия (получить отчет)
 @router.callback_query(F.data == "get_report")
