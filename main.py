@@ -44,12 +44,19 @@ def load_data(token):
         with open(f"{token}.json", "r") as f:
             return json.load(f)
     except FileNotFoundError:
+        logging.error(f"Файл {token}.json не найден.")
+        return []
+    except json.JSONDecodeError:
+        logging.error(f"Ошибка декодирования JSON в файле {token}.json.")
         return []
 
 # Функция для сохранения данных в JSON
 def save_data(token, data):
-    with open(f"{token}.json", "w") as f:
-        json.dump(data, f, indent=4)
+    try:
+        with open(f"{token}.json", "w") as f:
+            json.dump(data, f, indent=4)
+    except Exception as e:
+        logging.error(f"Ошибка сохранения данных в файл {token}.json: {e}")
 
 # Функция для генерации Excel-отчета
 def generate_excel(token, data):
@@ -90,11 +97,13 @@ async def send_email(email, filename, token):
 # Обработчик команды /start
 @router.message(CommandStart())
 async def cmd_start(message: types.Message):
+    logging.info(f"Получена команда /start от {message.from_user.id}")
     await message.answer("Привет! Выберите токен для работы:", reply_markup=get_token_keyboard())
 
 # Обработчик выбора токена
 @router.callback_query(F.data.in_(TOKENS))
 async def process_token(callback: types.CallbackQuery, state: FSMContext):
+    logging.info(f"Выбран токен {callback.data} от {callback.from_user.id}")
     await state.update_data(token=callback.data)
     await callback.message.answer(f"Выбран токен: {callback.data}. Что вы хотите сделать?", reply_markup=get_action_keyboard())
     await callback.answer()
@@ -102,6 +111,7 @@ async def process_token(callback: types.CallbackQuery, state: FSMContext):
 # Обработчик выбора действия (добавить сделку)
 @router.callback_query(F.data == "add_trade")
 async def add_trade(callback: types.CallbackQuery, state: FSMContext):
+    logging.info(f"Выбрано действие 'добавить сделку' от {callback.from_user.id}")
     await callback.message.answer("Введите данные сделки в формате: тип (buy/sell), цена, объем.")
     await state.set_state("add_trade_data")
     await callback.answer()
@@ -124,17 +134,21 @@ async def process_trade_data(message: types.Message, state: FSMContext):
                 "amount": amount
             })
             save_data(token, trades)
+            logging.info(f"Сделка добавлена от {message.from_user.id}")
             await message.answer("Сделка добавлена.")
             await state.clear()
         except ValueError:
+            logging.error(f"Неверный формат ввода данных сделки от {message.from_user.id}")
             await message.answer("Неверный формат. Попробуйте снова.")
         await state.set_state(None)
     else:
+        logging.warning(f"Попытка ввода данных сделки без выбора действия от {message.from_user.id}")
         await message.answer("Пожалуйста, сначала выберите операцию добавления сделки.")
 
 # Обработчик выбора действия (получить отчет)
 @router.callback_query(F.data == "get_report")
 async def get_report(callback: types.CallbackQuery, state: FSMContext):
+    logging.info(f"Выбрано действие 'получить отчет' от {callback.from_user.id}")
     await callback.message.answer("Введите ваш email для отправки отчета:")
     await state.set_state(EmailState.email)
     await callback.answer()
@@ -149,12 +163,15 @@ async def process_email(message: types.Message, state: FSMContext):
         trades = load_data(token)
         filename = generate_excel(token, trades)
         if await send_email(email, filename, token):
+            logging.info(f"Отчет отправлен на {email} от {message.from_user.id}")
             await message.answer("Отчет отправлен на ваш email.")
         else:
+            logging.error(f"Ошибка при отправке отчета на {email} от {message.from_user.id}")
             await message.answer("Ошибка при отправке отчета.")
         os.remove(filename)
         await state.clear()
     else:
+        logging.error(f"Неверный формат email от {message.from_user.id}")
         await message.answer("Неверный формат email. Попробуйте снова.")
         await state.set_state(EmailState.email)
 
