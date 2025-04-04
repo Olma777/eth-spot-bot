@@ -179,12 +179,16 @@ async def on_startup(bot: Bot):
     webhook_url = f"{WEBHOOK_HOST}/webhook"
     await bot.set_webhook(webhook_url)
 
+async def handle_root(request):
+    return web.Response(text="Bot is running")
+
 async def main():
     app = web.Application()
     webhook_requests_handler = SimpleRequestHandler(dispatcher=dp, bot=bot)
     webhook_requests_handler.register(app, path="/webhook")
     setup_application(app, dp, bot=bot)
     app.router.add_get("/healthz", healthcheck)
+    app.router.add_get("/", handle_root)
     dp.startup.register(on_startup)
     runner = web.AppRunner(app)
     await runner.setup()
