@@ -218,7 +218,7 @@ async def on_startup(bot: Bot):
 async def handle_root(request):
     return web.Response(text="Bot is running")
 
-async function main():
+async def main():
     app = web.Application()
     webhook_requests_handler = SimpleRequestHandler(dispatcher=dp, bot=bot)
     webhook_requests_handler.register(app, path="/webhook")
